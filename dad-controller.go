@@ -4,28 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"regexp"
 	"time"
 )
 
-/*
-// IActivityRule todo
-type IActivityRule interface {
-	AddProgramPattern(programPattern string)
-	AddAllowedPeriod(days []time.Weekday, begin int, end int)
-	SetMaximumAllowedDurationPerDay(days []time.Weekday, maximumAllowedDurationPerDay time.Duration)
-}
-
-// IDadController todo
-type IDadController interface {
-	// GetActivityDuration returns the cumulated execution of the activity for the current day.
-	GetActivityDuration(activity string) time.Duration
-
-	// GetOrCreateActivity lookups the activity rule or create a new one if it does not exist.
-	GetOrCreateActivityRule(activity string) IActivityRule
-}
-*/
 type timePeriod struct {
 	Begin int `json:"begin"`
 	End   int `json:"end"`
@@ -44,10 +28,14 @@ type activityRule struct {
 
 type dadController struct {
 	// configuration
-	SamplingInterval time.Duration
-	Activities       []*activityRule
+	configFile      string
+	confLastModTime time.Time
+
+	SamplingInterval time.Duration   `json:"samplingInterval"`
+	Activities       []*activityRule `json:"rules"`
 
 	// hook for tests
+	GetTime              func() time.Time
 	GetRunningProcesses  func() []runningProcess
 	KillRunningProcesses func(activity string, rp []*runningProcess, reason string)
 	WarnAboutKill        func(activity string, rp []*runningProcess, reason string)
@@ -63,12 +51,63 @@ type runningProcess struct {
 }
 
 // NewDadController returns a new instance of IDadController
-func newDadController(samplingInterval time.Duration) *dadController {
+func newDadController(samplingInterval time.Duration, getTimeFunc func() time.Time) *dadController {
 	return &dadController{SamplingInterval: samplingInterval,
 		ActivityDuration:     make(map[time.Weekday]map[string]time.Duration),
+		GetTime:              getTimeFunc,
 		GetRunningProcesses:  getRunningProcesses,
 		KillRunningProcesses: kill,
 		WarnAboutKill:        warn,
+		LastControlTime:      getTimeFunc(),
+	}
+}
+
+func newDadControllerWithConfigFile(configFile string) *dadController {
+	getTimeFunc := time.Now
+	ctrl := &dadController{
+		configFile:           configFile,
+		ActivityDuration:     make(map[time.Weekday]map[string]time.Duration),
+		GetTime:              getTimeFunc,
+		GetRunningProcesses:  getRunningProcesses,
+		KillRunningProcesses: kill,
+		WarnAboutKill:        warn,
+		LastControlTime:      getTimeFunc(),
+	}
+	ctrl.reloadConfIfNeeded()
+	return ctrl
+}
+
+func (c *dadController) reloadConfIfNeeded() {
+	stat, err := os.Stat(c.configFile)
+	if err != nil {
+		panic(err)
+	}
+	if stat.ModTime().After(c.confLastModTime) {
+		fmt.Println("Detecting change of configuration. Reloading it.")
+		c.confLastModTime = stat.ModTime()
+
+		jsonFile, err := os.Open(c.configFile)
+		if err != nil {
+			panic(err)
+		}
+		defer jsonFile.Close()
+
+		data, err := ioutil.ReadAll(jsonFile)
+		if err != nil {
+			panic(err)
+		}
+
+		var tmpCtrl dadController
+		json.Unmarshal(data, &tmpCtrl)
+
+		c.Activities = tmpCtrl.Activities
+		c.SamplingInterval = tmpCtrl.SamplingInterval
+
+		fmt.Printf("Sampling Interval: %s\n", c.SamplingInterval)
+		for idx := range c.Activities {
+			fmt.Printf("Activity [%s]\n", c.Activities[idx].Name)
+
+		}
 	}
 }
 
@@ -141,7 +180,7 @@ func (a *activityRule) SetMaximumAllowedDurationPerDay(days []time.Weekday, maxi
 
 func (c *dadController) scan() {
 	rp := c.getRunningProcessesPerActivity()
-	c.updateActivityCounters(rp, time.Now())
+	c.updateActivityCounters(rp, c.GetTime())
 	c.controlActivities(rp)
 }
 
@@ -216,14 +255,15 @@ func (c *dadController) controlActivities(rp map[string][]*runningProcess) {
 
 		schedule, found := a.AllowedSchedules[day]
 		if !found {
-			fmt.Printf("/!\\ %s activity not allowed to run on %s", activity, day.String())
-			// no schedule for this day, activity to kill
+			fmt.Printf("/!\\ %s activity not allowed to run on %s\n", activity, day.String())
+			c.KillRunningProcesses(activity, rp[activity], "Activity not allowed to be done on this day")
 			continue
 		}
 
 		if ad[activity] > schedule.MaxDuration {
-			fmt.Printf("/!\\ %s activity is above max duration %s for %s (currently %s)", activity, schedule.MaxDuration.String(), day.String(), ad[activity])
-			// over usage, activity to kill
+			fmt.Printf("/!\\ %s activity is above max duration %s for %s (currently %s)\n", activity, schedule.MaxDuration.String(), day.String(), ad[activity])
+			c.KillRunningProcesses(activity, rp[activity], "Activity duration above threshold for this day")
+			continue
 		}
 
 		// TODO warning duration
@@ -236,7 +276,9 @@ func (c *dadController) controlActivities(rp map[string][]*runningProcess) {
 		}
 
 		if !foundValidPeriod {
-			// outside of valid period
+			fmt.Printf("/!\\ %s activity is not allowed to run at this time\n", activity)
+			c.KillRunningProcesses(activity, rp[activity], "Activity not allowed to be done during this time range")
+			continue
 		}
 	}
 }
@@ -276,4 +318,11 @@ func kill(activity string, rp []*runningProcess, reason string) {
 }
 
 func main() {
+	ctrl := newDadControllerWithConfigFile("dad-controller.json")
+
+	for {
+		ctrl.reloadConfIfNeeded()
+		time.Sleep(ctrl.SamplingInterval)
+		ctrl.scan()
+	}
 }

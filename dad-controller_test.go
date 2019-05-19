@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -8,15 +9,24 @@ import (
 type TestContext struct {
 	t                *testing.T
 	controller       *dadController
+	currentTime      time.Time
 	runningProcesses []runningProcess
+	killedProcesses  []string
 }
 
 func NewTest(t *testing.T) *TestContext {
-	return &TestContext{t: t}
+	return &TestContext{t: t, currentTime: time.Now()}
 }
 
 func (ctx *TestContext) GivenADadControllerWithSamplingInterval(samplingInterval time.Duration) *TestContext {
-	ctx.controller = newDadController(samplingInterval)
+	getTimeFunc := func() time.Time { return ctx.currentTime }
+	ctx.controller = newDadController(samplingInterval, getTimeFunc)
+	ctx.controller.GetTime = getTimeFunc
+	ctx.controller.KillRunningProcesses = func(activity string, rp []*runningProcess, reason string) {
+		for _, p := range rp {
+			ctx.killedProcesses = append(ctx.killedProcesses, fmt.Sprintf("%s|%d|%s|%s", activity, p.Pid, p.Path, reason))
+		}
+	}
 	return ctx
 }
 
@@ -65,6 +75,8 @@ func (ctx *TestContext) WhenDayChanges() *TestContext {
 }
 
 func (ctx *TestContext) WhenScanHappens() *TestContext {
+	ctx.killedProcesses = []string{}
+	ctx.currentTime = ctx.currentTime.Add(ctx.controller.SamplingInterval)
 	ctx.controller.scan()
 	return ctx
 }
@@ -77,13 +89,30 @@ func (ctx *TestContext) ThenActivityExecutionDurationShouldBe(activity string, e
 	return ctx
 }
 
-func (ctx *TestContext) ThenNoProcessKilled() *TestContext {
-	ctx.t.Error("ThenNoProcessKilled Not implemented")
+func (ctx *TestContext) GivenTimeIs(t time.Time) *TestContext {
+	ctx.currentTime = t
 	return ctx
 }
 
-func (ctx *TestContext) ThenProcessIsKilled(activity string, expectedDuration time.Duration) *TestContext {
-	ctx.t.Error("ThenProcessIsKilled Not implemented")
+func (ctx *TestContext) ThenNoProcessKilled() *TestContext {
+	if len(ctx.killedProcesses) > 0 {
+		ctx.t.Error("Some processes have been killed")
+	}
+	return ctx
+}
+
+func (ctx *TestContext) ThenProcessIsKilled(activity string, pid int, path string, reason string) *TestContext {
+	info := fmt.Sprintf("%s|%d|%s|%s", activity, pid, path, reason)
+	found := false
+	for _, k := range ctx.killedProcesses {
+		if k == info {
+			found = true
+			break
+		}
+	}
+	if !found {
+		ctx.t.Errorf("%s not found in list of processes killed", info)
+	}
 	return ctx
 }
 
@@ -107,14 +136,20 @@ func TestActivityCountersMustBeResettedWhenChangingDay(t *testing.T) {
 }
 
 func TestRunningProcessIsKilledIfRunningOnANonAllowedDay(t *testing.T) {
+	notSunday := time.Now()
+	if notSunday.Weekday() == time.Sunday {
+		notSunday = notSunday.Add(time.Duration(24) * time.Hour)
+	}
 	NewTest(t).
 		GivenADadControllerWithSamplingInterval(time.Duration(1)*time.Minute).
 		GivenAnActivityRuleAllowedOnlyOnSunday("GTA", "GTA.exe", time.Duration(15)*time.Minute).
+		GivenTimeIs(notSunday).
 		GivenARunningProcess("C:\\GTA.exe", 1).
 		WhenScanHappens().
 		ThenActivityExecutionDurationShouldBe("GTA", time.Duration(1)*time.Minute).
-		ThenProcessIsKilled("C:\\GTA.exe", 1)
+		ThenProcessIsKilled("GTA", 1, "C:\\GTA.exe", "Activity not allowed to be done on this day")
 }
+
 func TestRunningProcessIsKilledIfRunningLongerThanAllowed(t *testing.T) {
 	NewTest(t).
 		GivenADadControllerWithSamplingInterval(time.Duration(1)*time.Minute).
@@ -126,14 +161,24 @@ func TestRunningProcessIsKilledIfRunningLongerThanAllowed(t *testing.T) {
 		ThenNoProcessKilled().
 		WhenScanHappens().
 		ThenActivityExecutionDurationShouldBe("GTA", time.Duration(16)*time.Minute).
-		ThenProcessIsKilled("C:\\GTA.exe", 1)
+		ThenProcessIsKilled("GTA", 1, "C:\\GTA.exe", "Activity duration above threshold for this day")
 }
+
 func TestRunningProcessIsKilledIfRunningOutsideOfAllowedPeriods(t *testing.T) {
+	now := time.Now()
+	beforePeriod := time.Date(now.Year(), now.Month(), now.Day(), 18, 0, 0, 0, time.Local)
+	afterPeriod := time.Date(now.Year(), now.Month(), now.Day(), 21, 0, 0, 0, time.Local)
+
 	NewTest(t).
 		GivenADadControllerWithSamplingInterval(time.Duration(1)*time.Minute).
 		GivenAnActivityRuleAllowedEveryDayOnInterval("GTA", "GTA.exe", time.Duration(15)*time.Minute, 2000, 2100).
+		GivenTimeIs(beforePeriod).
 		GivenARunningProcess("C:\\GTA.exe", 1).
 		WhenScanHappens().
 		ThenActivityExecutionDurationShouldBe("GTA", time.Duration(1)*time.Minute).
-		ThenProcessIsKilled("C:\\GTA.exe", 1)
+		ThenProcessIsKilled("GTA", 1, "C:\\GTA.exe", "Activity not allowed to be done during this time range").
+		GivenTimeIs(afterPeriod).
+		WhenScanHappens().
+		ThenActivityExecutionDurationShouldBe("GTA", time.Duration(2)*time.Minute).
+		ThenProcessIsKilled("GTA", 1, "C:\\GTA.exe", "Activity not allowed to be done during this time range")
 }

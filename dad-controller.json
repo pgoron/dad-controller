@@ -1,0 +1,20 @@
+{
+    "samplingInterval" : "1m",
+    "rules": [
+        {
+            "name": "GTA",
+            "programs": ["GTAV.exe", "GTALauncher.exe"],
+            "schedules": {
+                "Monday" : {
+                    "maxDuration" : "2h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 1630,
+                            "end" : 1930
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}
