@@ -1,15 +1,69 @@
 {
-    "samplingInterval" : "1m",
+    "samplingInterval" : "30s",
     "rules": [
         {
             "name": "GTA",
-            "programs": ["GTAV.exe", "GTALauncher.exe"],
+            "programs": ["GTAV.exe", "GTALauncher.exe", "Calculator.exe"],
             "schedules": {
-                "Monday" : {
+                "0" : {
+                    "maxDuration" : "4h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 700,
+                            "end" : 1930
+                        }
+                    ]
+                },
+                "1" : {
                     "maxDuration" : "2h",
                     "allowedPeriods" : [
                         {
                             "begin" : 1630,
+                            "end" : 1930
+                        }
+                    ]
+                },
+                "2" : {
+                    "maxDuration" : "2h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 1630,
+                            "end" : 1930
+                        }
+                    ]
+                },
+                "3" : {
+                    "maxDuration" : "4h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 700,
+                            "end" : 1930
+                        }
+                    ]
+                },
+                "4" : {
+                    "maxDuration" : "2h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 1630,
+                            "end" : 1930
+                        }
+                    ]
+                },
+                "5" : {
+                    "maxDuration" : "2h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 1630,
+                            "end" : 1930
+                        }
+                    ]
+                },
+                "6" : {
+                    "maxDuration" : "4h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 700,
                             "end" : 1930
                         }
                     ]

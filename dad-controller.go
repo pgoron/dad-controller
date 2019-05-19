@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -10,14 +11,41 @@ import (
 	"time"
 )
 
+type duration time.Duration
+
+func (d duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(fmt.Sprintf("%s", time.Duration(d)))
+}
+
+func (d *duration) UnmarshalJSON(b []byte) error {
+	var v interface{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	switch value := v.(type) {
+	case float64:
+		*d = duration(time.Duration(value))
+		return nil
+	case string:
+		tmp, err := time.ParseDuration(value)
+		if err != nil {
+			return err
+		}
+		*d = duration(tmp)
+		return nil
+	default:
+		return errors.New("invalid duration")
+	}
+}
+
 type timePeriod struct {
 	Begin int `json:"begin"`
 	End   int `json:"end"`
 }
 
 type schedule struct {
-	AllowedPeriods []timePeriod  `json:"allowedPeriods"`
-	MaxDuration    time.Duration `json:"maxDuration"`
+	AllowedPeriods []timePeriod `json:"allowedPeriods"`
+	MaxDuration    duration     `json:"maxDuration"`
 }
 
 type activityRule struct {
@@ -31,14 +59,14 @@ type dadController struct {
 	configFile      string
 	confLastModTime time.Time
 
-	SamplingInterval time.Duration   `json:"samplingInterval"`
+	SamplingInterval duration        `json:"samplingInterval"`
 	Activities       []*activityRule `json:"rules"`
 
 	// hook for tests
 	GetTime              func() time.Time
 	GetRunningProcesses  func() []runningProcess
-	KillRunningProcesses func(activity string, rp []*runningProcess, reason string)
-	WarnAboutKill        func(activity string, rp []*runningProcess, reason string)
+	KillRunningProcesses func(activity string, rp []runningProcess, reason string)
+	WarnAboutKill        func(activity string, rp []runningProcess, reason string)
 
 	// state
 	LastControlTime  time.Time
@@ -52,7 +80,7 @@ type runningProcess struct {
 
 // NewDadController returns a new instance of IDadController
 func newDadController(samplingInterval time.Duration, getTimeFunc func() time.Time) *dadController {
-	return &dadController{SamplingInterval: samplingInterval,
+	return &dadController{SamplingInterval: duration(samplingInterval),
 		ActivityDuration:     make(map[time.Weekday]map[string]time.Duration),
 		GetTime:              getTimeFunc,
 		GetRunningProcesses:  getRunningProcesses,
@@ -103,7 +131,7 @@ func (c *dadController) reloadConfIfNeeded() {
 		c.Activities = tmpCtrl.Activities
 		c.SamplingInterval = tmpCtrl.SamplingInterval
 
-		fmt.Printf("Sampling Interval: %s\n", c.SamplingInterval)
+		fmt.Printf("Sampling Interval: %s\n", time.Duration(c.SamplingInterval).String())
 		for idx := range c.Activities {
 			fmt.Printf("Activity [%s]\n", c.Activities[idx].Name)
 
@@ -174,7 +202,7 @@ func (a *activityRule) AddAllowedPeriod(days []time.Weekday, begin int, end int)
 
 func (a *activityRule) SetMaximumAllowedDurationPerDay(days []time.Weekday, maximumAllowedDurationPerDay time.Duration) {
 	for _, d := range days {
-		a.getOrCreateSchedule(d).MaxDuration = maximumAllowedDurationPerDay
+		a.getOrCreateSchedule(d).MaxDuration = duration(maximumAllowedDurationPerDay)
 	}
 }
 
@@ -184,23 +212,24 @@ func (c *dadController) scan() {
 	c.controlActivities(rp)
 }
 
-func (c *dadController) getRunningProcessesPerActivity() map[string][]*runningProcess {
+func (c *dadController) getRunningProcessesPerActivity() map[string][]runningProcess {
 	processes := c.GetRunningProcesses()
 
 	// map processes to activities
-	results := make(map[string][]*runningProcess)
+	results := make(map[string][]runningProcess)
 	for _, activity := range c.Activities {
 		for _, processPattern := range activity.ProcessPatterns {
-			r, _ := regexp.Compile(processPattern)
+			regex, _ := regexp.Compile(processPattern)
 
 			for _, rp := range processes {
-				if r.MatchString(rp.Path) {
+				if regex.MatchString(rp.Path) {
+					fmt.Println(rp.Path)
 					r, found := results[activity.Name]
 					if !found {
-						r = []*runningProcess{}
+						r = []runningProcess{}
 						results[activity.Name] = r
 					}
-					results[activity.Name] = append(r, &rp)
+					results[activity.Name] = append(r, rp)
 				}
 			}
 		}
@@ -209,7 +238,7 @@ func (c *dadController) getRunningProcessesPerActivity() map[string][]*runningPr
 	return results
 }
 
-func (c *dadController) updateActivityCounters(rp map[string][]*runningProcess, now time.Time) {
+func (c *dadController) updateActivityCounters(rp map[string][]runningProcess, now time.Time) {
 	if now.Year() != c.LastControlTime.Year() ||
 		now.Month() != c.LastControlTime.Month() ||
 		now.Day() != c.LastControlTime.Day() {
@@ -234,15 +263,31 @@ func (c *dadController) updateActivityCounters(rp map[string][]*runningProcess, 
 			if !found {
 				d = time.Duration(0)
 			}
-			ad[activity] = d + c.SamplingInterval
+			ad[activity] = d + time.Duration(c.SamplingInterval)
 		}
 	}
 
+	c.dumpActivitiesDuration()
 }
 
-func (c *dadController) controlActivities(rp map[string][]*runningProcess) {
+func (c *dadController) dumpActivitiesDuration() {
+	fmt.Println("LastControlTime: ", c.LastControlTime)
 	day := c.LastControlTime.Weekday()
-	time := c.LastControlTime.Hour()*100 + c.LastControlTime.Minute()
+	fmt.Println("Day: ", day.String())
+
+	ad, found := c.ActivityDuration[day]
+	if !found {
+		return
+	}
+
+	for a, d := range ad {
+		fmt.Printf("[%s] = %s\n", a, d.String())
+	}
+}
+
+func (c *dadController) controlActivities(rp map[string][]runningProcess) {
+	day := c.LastControlTime.Weekday()
+	dayTime := c.LastControlTime.Hour()*100 + c.LastControlTime.Minute()
 
 	ad, found := c.ActivityDuration[day]
 	if !found {
@@ -260,8 +305,9 @@ func (c *dadController) controlActivities(rp map[string][]*runningProcess) {
 			continue
 		}
 
-		if ad[activity] > schedule.MaxDuration {
-			fmt.Printf("/!\\ %s activity is above max duration %s for %s (currently %s)\n", activity, schedule.MaxDuration.String(), day.String(), ad[activity])
+		maxDuration := time.Duration(schedule.MaxDuration)
+		if ad[activity] > maxDuration {
+			fmt.Printf("/!\\ %s activity is above max duration %s for %s (currently %s)\n", activity, maxDuration.String(), day.String(), ad[activity])
 			c.KillRunningProcesses(activity, rp[activity], "Activity duration above threshold for this day")
 			continue
 		}
@@ -270,7 +316,7 @@ func (c *dadController) controlActivities(rp map[string][]*runningProcess) {
 
 		foundValidPeriod := false
 		for _, ap := range schedule.AllowedPeriods {
-			if time >= ap.Begin && time < ap.End {
+			if dayTime >= ap.Begin && dayTime < ap.End {
 				foundValidPeriod = true
 			}
 		}
@@ -309,12 +355,19 @@ func getRunningProcesses() []runningProcess {
 	return processes
 }
 
-func warn(activity string, rp []*runningProcess, reason string) {
+func warn(activity string, rp []runningProcess, reason string) {
 
 }
 
-func kill(activity string, rp []*runningProcess, reason string) {
-
+func kill(activity string, rp []runningProcess, reason string) {
+	fmt.Printf("Killing activity %s\n", activity)
+	for _, p := range rp {
+		fmt.Printf("Killing process %d, %s\n", p.Pid, p.Path)
+		cmd := exec.Command("powershell", "-Command", fmt.Sprintf("& { Stop-Process -Id %d }", p.Pid))
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("Failure to kill process %d : %s\n", p.Pid, err)
+		}
+	}
 }
 
 func main() {
@@ -322,7 +375,7 @@ func main() {
 
 	for {
 		ctrl.reloadConfIfNeeded()
-		time.Sleep(ctrl.SamplingInterval)
+		time.Sleep(time.Duration(ctrl.SamplingInterval))
 		ctrl.scan()
 	}
 }

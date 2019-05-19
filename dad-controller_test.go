@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ func (ctx *TestContext) GivenADadControllerWithSamplingInterval(samplingInterval
 	getTimeFunc := func() time.Time { return ctx.currentTime }
 	ctx.controller = newDadController(samplingInterval, getTimeFunc)
 	ctx.controller.GetTime = getTimeFunc
-	ctx.controller.KillRunningProcesses = func(activity string, rp []*runningProcess, reason string) {
+	ctx.controller.KillRunningProcesses = func(activity string, rp []runningProcess, reason string) {
 		for _, p := range rp {
 			ctx.killedProcesses = append(ctx.killedProcesses, fmt.Sprintf("%s|%d|%s|%s", activity, p.Pid, p.Path, reason))
 		}
@@ -69,14 +70,14 @@ func (ctx *TestContext) GivenARunningProcess(path string, pid int) *TestContext 
 }
 
 func (ctx *TestContext) WhenDayChanges() *TestContext {
-	rp := make(map[string][]*runningProcess)
+	rp := make(map[string][]runningProcess)
 	ctx.controller.updateActivityCounters(rp, ctx.controller.LastControlTime.Add(time.Duration(24)*time.Hour))
 	return ctx
 }
 
 func (ctx *TestContext) WhenScanHappens() *TestContext {
 	ctx.killedProcesses = []string{}
-	ctx.currentTime = ctx.currentTime.Add(ctx.controller.SamplingInterval)
+	ctx.currentTime = ctx.currentTime.Add(time.Duration(ctx.controller.SamplingInterval))
 	ctx.controller.scan()
 	return ctx
 }
@@ -181,4 +182,14 @@ func TestRunningProcessIsKilledIfRunningOutsideOfAllowedPeriods(t *testing.T) {
 		WhenScanHappens().
 		ThenActivityExecutionDurationShouldBe("GTA", time.Duration(2)*time.Minute).
 		ThenProcessIsKilled("GTA", 1, "C:\\GTA.exe", "Activity not allowed to be done during this time range")
+}
+
+func TestJson(t *testing.T) {
+
+	ctx := NewTest(t).
+		GivenADadControllerWithSamplingInterval(time.Duration(1)*time.Minute).
+		GivenAnActivityRuleAllowedEveryDayOnInterval("GTA", "GTA.exe", time.Duration(15)*time.Minute, 2000, 2100)
+
+	data, _ := json.Marshal(ctx.controller.Activities)
+	fmt.Println(string(data))
 }
