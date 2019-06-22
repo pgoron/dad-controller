@@ -2,24 +2,28 @@
     "samplingInterval" : "30s",
     "rules": [
         {
-            "name": "GTA",
-            "programs": ["GTAV.exe", "GTALauncher.exe", "Calculator.exe"],
+            "name": "Jeux Steam",
+            "programs": ["Steam.steamapps.common.*.exe", "Roblox"],
             "schedules": {
                 "0" : {
-                    "maxDuration" : "4h",
+                    "maxDuration" : "3h",
                     "allowedPeriods" : [
                         {
                             "begin" : 700,
-                            "end" : 1930
+                            "end" : 1145
+                        },
+                        {
+                            "begin" : 1300,
+                            "end" : 1900
                         }
                     ]
                 },
                 "1" : {
-                    "maxDuration" : "2h",
+                    "maxDuration" : "1h",
                     "allowedPeriods" : [
                         {
                             "begin" : 1630,
-                            "end" : 1930
+                            "end" : 1900
                         }
                     ]
                 },
@@ -28,43 +32,132 @@
                     "allowedPeriods" : [
                         {
                             "begin" : 1630,
-                            "end" : 1930
+                            "end" : 2115
                         }
                     ]
                 },
                 "3" : {
-                    "maxDuration" : "4h",
+                    "maxDuration" : "3h",
                     "allowedPeriods" : [
                         {
                             "begin" : 700,
-                            "end" : 1930
+                            "end" : 1145
+                        },
+                        {
+                            "begin" : 1300,
+                            "end" : 1900
                         }
                     ]
                 },
                 "4" : {
-                    "maxDuration" : "2h",
+                    "maxDuration" : "1h",
                     "allowedPeriods" : [
                         {
                             "begin" : 1630,
-                            "end" : 1930
+                            "end" : 1900
                         }
                     ]
                 },
                 "5" : {
-                    "maxDuration" : "2h",
+                    "maxDuration" : "1h",
                     "allowedPeriods" : [
                         {
                             "begin" : 1630,
-                            "end" : 1930
+                            "end" : 1900
                         }
                     ]
                 },
                 "6" : {
-                    "maxDuration" : "4h",
+                    "maxDuration" : "3h",
                     "allowedPeriods" : [
                         {
                             "begin" : 700,
-                            "end" : 1930
+                            "end" : 1145
+                        },
+                        {
+                            "begin" : 1300,
+                            "end" : 1900
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Internet",
+            "programs": ["firefox.exe", "chrome.exe"],
+            "schedules": {
+                "0" : {
+                    "maxDuration" : "2h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 700,
+                            "end" : 1145
+                        },
+                        {
+                            "begin" : 1300,
+                            "end" : 1900
+                        }
+                    ]
+                },
+                "1" : {
+                    "maxDuration" : "1h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 1630,
+                            "end" : 1900
+                        }
+                    ]
+                },
+                "2" : {
+                    "maxDuration" : "1h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 1630,
+                            "end" : 1900
+                        }
+                    ]
+                },
+                "3" : {
+                    "maxDuration" : "2h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 700,
+                            "end" : 1145
+                        },
+                        {
+                            "begin" : 1300,
+                            "end" : 1900
+                        }
+                    ]
+                },
+                "4" : {
+                    "maxDuration" : "1h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 1630,
+                            "end" : 1900
+                        }
+                    ]
+                },
+                "5" : {
+                    "maxDuration" : "1h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 1630,
+                            "end" : 1900
+                        }
+                    ]
+                },
+                "6" : {
+                    "maxDuration" : "2h",
+                    "allowedPeriods" : [
+                        {
+                            "begin" : 700,
+                            "end" : 1145
+                        },
+                        {
+                            "begin" : 1300,
+                            "end" : 1900
                         }
                     ]
                 }
