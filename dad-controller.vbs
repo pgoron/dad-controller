@@ -1,0 +1,1 @@
+CreateObject("Wscript.Shell").Run "dad-controller.cmd", 0, True
