@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 )
@@ -185,11 +187,39 @@ func TestRunningProcessIsKilledIfRunningOutsideOfAllowedPeriods(t *testing.T) {
 }
 
 func TestJson(t *testing.T) {
-
 	ctx := NewTest(t).
 		GivenADadControllerWithSamplingInterval(time.Duration(1)*time.Minute).
-		GivenAnActivityRuleAllowedEveryDayOnInterval("GTA", "GTA.exe", time.Duration(15)*time.Minute, 2000, 2100)
+		GivenAnActivityRuleAllowedEveryDayOnInterval("GTA", "GTA.exe", time.Duration(15)*time.Minute, 2000, 2100).
+		GivenARunningProcess("GTA.exe", 1).
+		WhenScanHappens()
 
-	data, _ := json.Marshal(ctx.controller.Activities)
+	data, _ := json.Marshal(ctx.controller)
 	fmt.Println(string(data))
+
+	var ctrl dadController
+	err := json.Unmarshal(data, &ctrl)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if ctrl.LastControlTime != ctx.controller.LastControlTime {
+		data, _ := json.Marshal(ctrl)
+		fmt.Println(string(data))
+
+		t.Error("mismatch")
+	}
+}
+
+func TestUnmarchal(t *testing.T) {
+	file, _ := os.Open("dad-controller.state")
+	data, _ := ioutil.ReadAll(file)
+	fmt.Println(string(data))
+	var ctrl dadController
+	err := json.Unmarshal(data, &ctrl)
+	if err != nil {
+		t.Error(err)
+	}
+	data, _ = json.Marshal(ctrl)
+	fmt.Println(string(data))
+
 }

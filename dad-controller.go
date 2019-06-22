@@ -38,50 +38,51 @@ func (d *duration) UnmarshalJSON(b []byte) error {
 	}
 }
 
-type timePeriod struct {
-	Begin int `json:"begin"`
-	End   int `json:"end"`
-}
+type (
+	timePeriod struct {
+		Begin int `json:"begin"`
+		End   int `json:"end"`
+	}
 
-type schedule struct {
-	AllowedPeriods []timePeriod `json:"allowedPeriods"`
-	MaxDuration    duration     `json:"maxDuration"`
-}
+	schedule struct {
+		AllowedPeriods []timePeriod `json:"allowedPeriods"`
+		MaxDuration    duration     `json:"maxDuration"`
+	}
 
-type activityRule struct {
-	Name             string                     `json:"name"`
-	ProcessPatterns  []string                   `json:"programs"`
-	AllowedSchedules map[time.Weekday]*schedule `json:"schedules"`
-}
+	activityRule struct {
+		Name             string                     `json:"name"`
+		ProcessPatterns  []string                   `json:"programs"`
+		AllowedSchedules map[time.Weekday]*schedule `json:"schedules"`
+	}
 
-type dadController struct {
-	// configuration
-	configFile      string
-	confLastModTime time.Time
+	dadController struct {
+		// configuration
+		configFile      string
+		confLastModTime time.Time
 
-	SamplingInterval duration        `json:"samplingInterval"`
-	Activities       []*activityRule `json:"rules"`
+		SamplingInterval duration        `json:"samplingInterval"`
+		Activities       []*activityRule `json:"rules"`
 
-	// hook for tests
-	GetTime              func() time.Time
-	GetRunningProcesses  func() []runningProcess
-	KillRunningProcesses func(activity string, rp []runningProcess, reason string)
-	WarnAboutKill        func(activity string, rp []runningProcess, reason string)
+		// hook for tests
+		GetTime              func() time.Time                                          `json:"-"`
+		GetRunningProcesses  func() []runningProcess                                   `json:"-"`
+		KillRunningProcesses func(activity string, rp []runningProcess, reason string) `json:"-"`
+		WarnAboutKill        func(activity string, rp []runningProcess, reason string) `json:"-"`
 
-	// state
-	LastControlTime  time.Time
-	ActivityDuration map[time.Weekday]map[string]time.Duration
-}
+		// state
+		LastControlTime  time.Time                            `json:"lastControlTime"`
+		ActivityDuration map[time.Weekday]map[string]duration `json:"activityDuration"`
+	}
 
-type runningProcess struct {
-	Pid  int    `json:"Id"`
-	Path string `json:"Path"`
-}
+	runningProcess struct {
+		Pid  int    `json:"Id"`
+		Path string `json:"Path"`
+	}
+)
 
-// NewDadController returns a new instance of IDadController
 func newDadController(samplingInterval time.Duration, getTimeFunc func() time.Time) *dadController {
 	return &dadController{SamplingInterval: duration(samplingInterval),
-		ActivityDuration:     make(map[time.Weekday]map[string]time.Duration),
+		ActivityDuration:     make(map[time.Weekday]map[string]duration),
 		GetTime:              getTimeFunc,
 		GetRunningProcesses:  getRunningProcesses,
 		KillRunningProcesses: kill,
@@ -94,7 +95,7 @@ func newDadControllerWithConfigFile(configFile string) *dadController {
 	getTimeFunc := time.Now
 	ctrl := &dadController{
 		configFile:           configFile,
-		ActivityDuration:     make(map[time.Weekday]map[string]time.Duration),
+		ActivityDuration:     make(map[time.Weekday]map[string]duration),
 		GetTime:              getTimeFunc,
 		GetRunningProcesses:  getRunningProcesses,
 		KillRunningProcesses: kill,
@@ -151,20 +152,20 @@ func (c *dadController) GetActivityDuration(activity string) time.Duration {
 		return time.Duration(0)
 	}
 
-	return d
+	return time.Duration(d)
 }
 
-func (c *dadController) updateActivityDuration(activity string, duration time.Duration) {
+func (c *dadController) updateActivityDuration(activity string, activityDuration time.Duration) {
 	day := c.LastControlTime.Weekday()
 
 	// make activity duration for the current day available
 	ad, found := c.ActivityDuration[day]
 	if !found {
-		ad = make(map[string]time.Duration)
+		ad = make(map[string]duration)
 		c.ActivityDuration[day] = ad
 	}
 
-	ad[activity] = duration
+	ad[activity] = duration(activityDuration)
 }
 
 func (c *dadController) getOrCreateActivityRule(activity string) *activityRule {
@@ -253,7 +254,7 @@ func (c *dadController) updateActivityCounters(rp map[string][]runningProcess, n
 		// make activity duration for the current day is available
 		ad, found := c.ActivityDuration[day]
 		if !found {
-			ad = make(map[string]time.Duration)
+			ad = make(map[string]duration)
 			c.ActivityDuration[day] = ad
 		}
 
@@ -261,9 +262,9 @@ func (c *dadController) updateActivityCounters(rp map[string][]runningProcess, n
 		for activity := range rp {
 			d, found := ad[activity]
 			if !found {
-				d = time.Duration(0)
+				d = duration(0)
 			}
-			ad[activity] = d + time.Duration(c.SamplingInterval)
+			ad[activity] = d + c.SamplingInterval
 		}
 	}
 
@@ -271,9 +272,10 @@ func (c *dadController) updateActivityCounters(rp map[string][]runningProcess, n
 }
 
 func (c *dadController) dumpActivitiesDuration() {
-	fmt.Println("LastControlTime: ", c.LastControlTime)
+	fmt.Println("================= Current State ===================")
 	day := c.LastControlTime.Weekday()
-	fmt.Println("Day: ", day.String())
+	fmt.Println("LastControlTime: ", c.LastControlTime)
+	fmt.Println("CurrentDay:", day.String())
 
 	ad, found := c.ActivityDuration[day]
 	if !found {
@@ -281,8 +283,10 @@ func (c *dadController) dumpActivitiesDuration() {
 	}
 
 	for a, d := range ad {
-		fmt.Printf("[%s] = %s\n", a, d.String())
+		fmt.Printf("  Activity: [%s] = %s\n", a, time.Duration(d).String())
 	}
+
+	fmt.Println("===================================================")
 }
 
 func (c *dadController) controlActivities(rp map[string][]runningProcess) {
@@ -295,6 +299,7 @@ func (c *dadController) controlActivities(rp map[string][]runningProcess) {
 		return
 	}
 
+	fmt.Println("============  Controlling Activities ==============")
 	for activity := range rp {
 		a := c.getOrCreateActivityRule(activity)
 
@@ -305,9 +310,8 @@ func (c *dadController) controlActivities(rp map[string][]runningProcess) {
 			continue
 		}
 
-		maxDuration := time.Duration(schedule.MaxDuration)
-		if ad[activity] > maxDuration {
-			fmt.Printf("/!\\ %s activity is above max duration %s for %s (currently %s)\n", activity, maxDuration.String(), day.String(), ad[activity])
+		if ad[activity] > schedule.MaxDuration {
+			fmt.Printf("/!\\ %s activity is above max duration %s for %s (currently %s)\n", activity, time.Duration(schedule.MaxDuration).String(), day.String(), time.Duration(ad[activity]).String())
 			c.KillRunningProcesses(activity, rp[activity], "Activity duration above threshold for this day")
 			continue
 		}
@@ -327,9 +331,11 @@ func (c *dadController) controlActivities(rp map[string][]runningProcess) {
 			continue
 		}
 	}
+	fmt.Println("===================================================")
 }
 
 func getRunningProcesses() []runningProcess {
+	fmt.Println("Scanning running processes ...")
 	cmd := exec.Command("powershell", "-Command", "& { ps | Select-Object Id,Path | ?{$_.Path -ne $null} | convertto-json }")
 
 	cmdOut, err := cmd.StdoutPipe()
@@ -352,6 +358,8 @@ func getRunningProcesses() []runningProcess {
 		panic(err)
 	}
 
+	fmt.Printf("Found %d running processes\n", len(processes))
+
 	return processes
 }
 
@@ -370,12 +378,63 @@ func kill(activity string, rp []runningProcess, reason string) {
 	}
 }
 
+func (c *dadController) reloadStateIfExist() {
+	_, err := os.Stat("dad-controller.state")
+	if os.IsNotExist(err) {
+		return
+	} else if err != nil {
+		fmt.Println("Failure to stat state file : ", err)
+		return
+	}
+
+	fmt.Println("Found state file, reloading it")
+
+	file, err := os.Open("dad-controller.state")
+	if err != nil {
+		fmt.Println("Failure to open state file : ", err)
+		return
+	}
+	defer file.Close()
+
+	data, err := ioutil.ReadAll(file)
+	if err != nil {
+		fmt.Println("Failure to read state file : ", err)
+		return
+	}
+
+	var tmpCtrl dadController
+	err = json.Unmarshal(data, &tmpCtrl)
+	if err != nil {
+		fmt.Println("Failure to parse state file : ", err)
+		return
+	}
+
+	c.LastControlTime = tmpCtrl.LastControlTime
+	c.ActivityDuration = tmpCtrl.ActivityDuration
+	c.dumpActivitiesDuration()
+}
+
+func (c *dadController) dumpState() {
+	data, err := json.Marshal(c)
+	if err != nil {
+		fmt.Println("Failure to serialize controller state to json : ", err)
+		return
+	}
+
+	err = ioutil.WriteFile("dad-controller.state", data, 0644)
+	if err != nil {
+		fmt.Println("Failure to write data to state file : ", err)
+	}
+}
+
 func main() {
 	ctrl := newDadControllerWithConfigFile("dad-controller.json")
 
+	ctrl.reloadStateIfExist()
 	for {
 		ctrl.reloadConfIfNeeded()
 		time.Sleep(time.Duration(ctrl.SamplingInterval))
 		ctrl.scan()
+		ctrl.dumpState()
 	}
 }
